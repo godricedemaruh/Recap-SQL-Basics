@@ -18,8 +18,8 @@ SELECT COUNT(id) FROM movies;    # 388269
 SELECT name, year FROM movies ORDER BY year ASC;   # oldest: Roundhay Garden Scene / 1888
 SELECT name, year FROM movies ORDER BY year DESC;   # newest: Harry Potter and the Half-Blood Prince / 2008
 # What movies have the highest and the lowest ranks?
-SELECT name, rank FROM movies WHERE rank = 1;
-SELECT name, rank FROM movies WHERE RANK >= 9.8 ORDER BY rank DESC;
+SELECT m.name, m.rank FROM movies m WHERE m.rank = 1;
+SELECT m.name, m.rank FROM movies m WHERE m.rank >= 9.8 ORDER BY m.rank DESC;
 # What is the most common movie title?
 SELECT name, COUNT(name) FROM movies GROUP BY name HAVING COUNT(name) > 10 ORDER BY COUNT(name) DESC;
 
@@ -35,7 +35,9 @@ SELECT * FROM movies_directors
 LEFT JOIN movies ON movie_id = id
 WHERE movie_id = 382052;
 # On average, how many actors are listed by movie?
-# ....
+SELECT AVG(ac_per_movie) FROM
+	(SELECT movie_id, COUNT(actor_id) AS ac_per_movie FROM roles
+	GROUP BY movie_id) AS subquery;
 # Are there movies with more than one “genre”?
 SELECT movie_id, COUNT(genre) FROM movies_genres GROUP BY movie_id ORDER BY COUNT(genre) DESC;
 
@@ -126,30 +128,107 @@ GROUP BY genre
 ORDER BY COUNT(movie_id) DESC
 LIMIT 5 OFFSET 0;
 # What is the evolution of the top movie genres across all the decades of the 20th century?
-SELECT mg.genre, COUNT(mg.movie_id) FROM movies_genres mg
-INNER JOIN movies m ON mg.movie_id = m.id
+SELECT mg.genre, FLOOR(m.year/10)*10 AS decade, COUNT(m.id) FROM movies_genres mg
+JOIN movies m ON mg.movie_id = m.id
 WHERE 1900 <= m.year < 2000 
-GROUP BY genre
-ORDER BY COUNT(movie_id) DESC
-LIMIT 5 OFFSET 0;  # change the year range to get the data for each decade....
+GROUP BY genre, decade
+ORDER BY decade, COUNT(m.id) DESC
+LIMIT 5 OFFSET 0;
 
 # Putting it all together: names, genders and time
 
 # Has the most common name for actors changed over time?
 # Get the most common actor name for each decade in the XX century.
+WITH cte AS (
+SELECT a.first_name as name, 
+	COUNT(a.first_name) as totals, 
+    FLOOR(m.year / 10) * 10 as decade,
+	RANK() OVER (PARTITION BY DECADE ORDER BY TOTALS DESC) AS ranking
+FROM actors a
+JOIN roles r
+	ON a.id = r.actor_id
+JOIN movies m
+	ON r.movie_id = m.id
+GROUP BY 1, 3
+ORDER BY 2 DESC)
+SELECT decade, name, totals
+FROM cte
+WHERE ranking = 1
+-- AND decade >= 1900
+-- AND decade < 1900
+ORDER BY decade;
 # Re-do the analysis on most common names, splitted for males and females.
-SELECT gender, COUNT(id) FROM actors  # How do I get the names in it????
-GROUP BY gender
-ORDER BY COUNT(id) DESC;
+WITH cte AS (
+SELECT a.first_name as name, 
+	COUNT(a.first_name) as totals, 
+    FLOOR(m.year / 10) * 10 as decade,
+	RANK() OVER (PARTITION BY DECADE ORDER BY TOTALS DESC) AS ranking
+FROM actors a
+JOIN roles r
+	ON a.id = r.actor_id
+JOIN movies m
+	ON r.movie_id = m.id
+WHERE a.gender LIKE 'f'
+GROUP BY 1, 3
+ORDER BY 2 DESC)
+SELECT decade, name, totals
+FROM cte
+WHERE ranking = 1
+-- AND decade >= 1900
+-- AND decade < 1900
+ORDER BY decade;
 # Is the proportion of female directors greater after 1968, compared to before 1968?
-# Data ?
+SELECT COUNT(movie_name_1)
+FROM
+(SELECT m.name as movie_name_1, COUNT(a.id) as male_actors
+FROM movies m
+JOIN roles r
+	ON m.id = r.movie_id
+JOIN actors a
+	ON r.actor_id = a.id
+WHERE a.gender LIKE "m"
+GROUP BY m.name) m_films
+JOIN
+(SELECT m.name as movie_name_2, COUNT(a.id) as female_actors
+FROM movies m
+JOIN roles r
+	ON m.id = r.movie_id
+JOIN actors a
+	ON r.actor_id = a.id
+WHERE a.gender LIKE "f"
+GROUP BY m.name) f_films
+ON m_films.movie_name_1 = f_films.movie_name_2
+WHERE f_films.female_actors > m_films.male_actors;
 # What is the movie genre where there are the most female directors? Answer the question both in absolute and relative terms.
-# Data ?
 # How many movies had a majority of females among their cast? Answer the question both in absolute and relative terms.
-SELECT gender, COUNT(r.actor_id), r.movie_id FROM movies m
-INNER JOIN roles r ON m.id = r.movie_id
-INNER JOIN actors a ON r.actor_id = a.id
-GROUP BY gender, r.movie_id
-ORDER BY COUNT(r.actor_id) DESC; ##### not finished
+SELECT COUNT(movie_name_1)
+FROM
+(SELECT m.name as movie_name_1, COUNT(a.id) as male_actors
+FROM movies m
+JOIN roles r
+	ON m.id = r.movie_id
+JOIN actors a
+	ON r.actor_id = a.id
+WHERE a.gender LIKE "m"
+GROUP BY m.name) m_films
+JOIN
+(SELECT m.name as movie_name_2, COUNT(a.id) as female_actors
+FROM movies m
+JOIN roles r
+	ON m.id = r.movie_id
+JOIN actors a
+	ON r.actor_id = a.id
+WHERE a.gender LIKE "f"
+GROUP BY m.name) f_films
+ON m_films.movie_name_1 = f_films.movie_name_2
+WHERE f_films.female_actors > m_films.male_actors;
 
-
+SELECT COUNT(*) as num_movies, COUNT(*)/(SELECT COUNT(*) FROM movies) as Percentage FROM
+(
+SELECT Count(movie_id) as count, 100*sum(case when gender = 'F' then 1 else 0 end)/count(*) fem_perc
+FROM
+roles
+JOIN actors ON actors.id = roles.actor_id
+GROUP BY movie_id
+) temp
+WHERE fem_perc >= 50;
